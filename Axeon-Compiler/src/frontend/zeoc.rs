@@ -44,6 +44,7 @@ impl ZeoCTransformer {
         self.result.push_str("/* ZeoC to C transformed code */\n");
         self.result.push_str("#include <stddef.h>\n");
         self.result.push_str("#include <stdbool.h>\n");
+        self.result.push_str("#include <stdint.h>\n");
         self.result.push_str("#include <stdio.h>\n");
         self.result.push_str("#include <stdlib.h>\n");
         
@@ -150,15 +151,16 @@ impl ZeoCTransformer {
                     let body = &rest[body_start + 1..body_end];
                     
                     for line in body.lines() {
-                        let field = line.trim();
+                        let field = line.trim().trim_end_matches(',');
                         if field.is_empty() { continue; }
                         
                         // x: int -> int x;
                         if let Some(colon) = field.find(':') {
                             let field_name = field[..colon].trim();
                             let field_type = field[colon + 1..].trim();
+                            let c_type = self.convert_type_to_c(field_type);
                             self.result.push_str("    ");
-                            self.result.push_str(field_type);
+                            self.result.push_str(&c_type);
                             self.result.push(' ');
                             self.result.push_str(field_name);
                             self.result.push_str(";\n");
@@ -228,7 +230,12 @@ impl ZeoCTransformer {
             if let Some(colon) = param.find(':') {
                 let name = param[..colon].trim();
                 let ptype = param[colon + 1..].trim();
-                result.push_str(&format!("{} {}", ptype, name));
+                // Convert ZeoC types to C
+                let ctype = self.convert_type_to_c(ptype);
+                result.push_str(&format!("{} {}", ctype, name));
+            } else if !param.contains(' ') {
+                // No type annotation - assume int
+                result.push_str(&format!("int {}", param));
             } else {
                 result.push_str(param);
             }
@@ -237,7 +244,7 @@ impl ZeoCTransformer {
         result
     }
 
-    fn transform_body_line(&self, line: &str) -> String {
+    fn transform_body_line(&mut self, line: &str) -> String {
         let trimmed = line.trim();
         
         // Skip empty lines inside functions
@@ -251,6 +258,11 @@ impl ZeoCTransformer {
             return format!("    return {};\n", if rest.is_empty() { "".to_string() } else { format!("{}", rest.trim_end_matches(';')) });
         }
         
+        // Const declaration
+        if trimmed.starts_with("const ") {
+            return self.transform_const_inline(trimmed);
+        }
+        
         // Let declaration
         if trimmed.starts_with("let ") {
             return self.transform_let_inline(trimmed);
@@ -261,6 +273,19 @@ impl ZeoCTransformer {
             return self.transform_print_inline(trimmed);
         }
         
+        // Printf - pass through but add semicolon if needed
+        if trimmed.starts_with("printf(") {
+            if !trimmed.ends_with(';') {
+                return format!("    {};\n", trimmed);
+            }
+            return format!("    {}\n", trimmed);
+        }
+        
+        // Unsafe block
+        if trimmed == "unsafe" || trimmed.starts_with("unsafe {") {
+            return self.transform_unsafe_inline(trimmed);
+        }
+        
         // Break/Continue
         if trimmed == "break" || trimmed == "break;" {
             return "    break;\n".to_string();
@@ -269,30 +294,119 @@ impl ZeoCTransformer {
             return "    continue;\n".to_string();
         }
         
-        // Pass through most C-like code as-is
-        // Just add proper indentation
-        if trimmed.starts_with("if ") || trimmed.starts_with("if(") {
-            return format!("    {}\n", trimmed.trim_end_matches(';'));
+        // If statement - transform "if cond {" to "if (cond) {"
+        if trimmed.starts_with("if ") && !trimmed.starts_with("if(") {
+            let transformed = self.transform_if_statement(trimmed);
+            return transformed;
         }
         
-        if trimmed.starts_with("for ") || trimmed.starts_with("for(") {
-            return format!("    {}\n", trimmed.trim_end_matches(';'));
+        // For loop - transform "for cond {" to "for (cond) {"
+        if trimmed.starts_with("for ") && !trimmed.starts_with("for(") {
+            // Check if this is a ZeoC-style for with let inside
+            if trimmed.contains("let ") {
+                let transformed = self.transform_for_loop_with_let(trimmed);
+                return transformed;
+            }
+            let transformed = self.transform_for_loop(trimmed);
+            return transformed;
         }
         
-        if trimmed.starts_with("while ") || trimmed.starts_with("while(") {
-            return format!("    {}\n", trimmed.trim_end_matches(';'));
+        // While loop - transform "while cond {" to "while (cond) {"
+        if trimmed.starts_with("while ") && !trimmed.starts_with("while(") {
+            let transformed = self.transform_while_loop(trimmed);
+            return transformed;
         }
         
-        if trimmed.starts_with("switch ") || trimmed.starts_with("switch(") {
-            return format!("    {}\n", trimmed.trim_end_matches(';'));
+        // Switch statement - transform "switch val {" to "switch (val) {"
+        if trimmed.starts_with("switch ") && !trimmed.starts_with("switch(") {
+            let transformed = self.transform_switch_statement(trimmed);
+            return transformed;
         }
         
-        // Add semicolon to expressions if missing
-        if !trimmed.ends_with('{') && !trimmed.ends_with('}') && !trimmed.ends_with(';') {
+        // Switch case or default - transform the statement inside
+        if trimmed.starts_with("case ") || trimmed.starts_with("default:") {
+            // Extract the case value and statement after the colon
+            let (prefix, rest) = if trimmed.starts_with("case ") {
+                let rest = trimmed.strip_prefix("case ").unwrap_or("");
+                if let Some(colon_pos) = rest.find(':') {
+                    let case_val = rest[..colon_pos].trim();
+                    let stmt = rest[colon_pos+1..].trim();
+                    (format!("case {}", case_val), stmt)
+                } else {
+                    return format!("    {}\n", trimmed);
+                }
+            } else {
+                let rest = trimmed.strip_prefix("default:").unwrap_or("");
+                ("default".to_string(), rest.trim())
+            };
+            
+            let stmt = rest.trim();
+            if stmt.is_empty() {
+                return format!("    {}:\n", prefix);
+            }
+            
+            // Transform the inner statement (e.g., print(100))
+            let transformed = self.transform_print_inline(stmt);
+            // Clean up - remove leading 4 spaces that transform adds
+            let transformed = transformed.trim();
+            // transform_print_inline adds "    " at the start and ";\n" at the end
+            let transformed = if transformed.starts_with("    ") {
+                &transformed[4..]
+            } else {
+                transformed
+            };
+            // Remove trailing semicolon
+            let transformed = transformed.trim_end_matches(';').trim();
+            
+            return format!("    {}: {};\n", prefix, transformed);
+        }
+        
+        // Add semicolon to expressions if missing (but not for case/default)
+        if !trimmed.ends_with('{') && !trimmed.ends_with('}') && !trimmed.ends_with(';') 
+           && !trimmed.starts_with("case ") && !trimmed.starts_with("default:") {
             return format!("    {};\n", trimmed);
         }
         
         format!("    {}\n", trimmed)
+    }
+    
+    fn transform_for_loop_with_let(&self, line: &str) -> String {
+        // Transform: for (let j: int = 0; j < 3; j = j + 1) { ... }
+        // To: for (int j = 0; j < 3; j = j + 1) { ... }
+        
+        // Extract the content between for ( and )
+        if let Some(paren_start) = line.find("for (") {
+            if let Some(paren_end) = line.find(") {") {
+                let content = &line[paren_start + 5..paren_end];
+                
+                // Find the let declaration
+                if content.contains("let ") {
+                    // Extract let part: "let j: int = 0"
+                    if let Some(let_start) = content.find("let ") {
+                        let let_part = &content[let_start..];
+                        
+                        // Parse the let declaration
+                        if let Some(eq_pos) = let_part.find('=') {
+                            let decl = let_part[..eq_pos].trim(); // "let j: int "
+                            let rest = &let_part[eq_pos + 1..]; // "0; j < 3; j = j + 1"
+                            
+                            if let Some(colon) = decl.find(':') {
+                                let var_name = decl[4..colon].trim(); // "j"
+                                let var_type = decl[colon + 1..].trim(); // "int"
+                                let ctype = self.convert_type_to_c(var_type);
+                                
+                                // Reconstruct: for (int j = 0; j < 3; j = j + 1) {
+                                let rest_trimmed = rest.trim_start_matches(' ').trim_start_matches(';').trim_start_matches(' ');
+                                return format!("    for ({} {} = {}) {{\n", ctype, var_name, rest_trimmed);
+                            }
+                        }
+                    }
+                }
+            }
+        }
+        
+        // Fallback
+        format!("    {};\n", line)
     }
 
     fn transform_for_loop(&self, line: &str) -> String {
@@ -350,11 +464,20 @@ impl ZeoCTransformer {
         // switch value { case 1: ... } -> switch (value) { case 1: ... }
         let rest = line.strip_prefix("switch ").unwrap_or("");
         
+        // Check for switch (expr) {
         if rest.contains("{") {
             if let Some(brace_pos) = rest.find("{") {
                 let expr = rest[..brace_pos].trim();
-                return format!("    switch ({}) {{\n", expr);
+                // Remove extra parentheses if already present
+                let clean_expr = expr.trim_start_matches('(').trim_end_matches(')').trim();
+                return format!("    switch ({}) {{\n", clean_expr);
             }
+        }
+        
+        // Check for switch (expr) without brace on same line
+        if rest.trim().ends_with(')') && !rest.contains('{') {
+            let expr = rest.trim().trim_start_matches('(').trim_end_matches(')').trim();
+            return format!("    switch ({}) {{\n", expr);
         }
         
         format!("    {}\n", line)
@@ -374,33 +497,228 @@ impl ZeoCTransformer {
         result
     }
 
-    fn transform_let_inline(&self, line: &str) -> String {
+    fn transform_let_inline(&mut self, line: &str) -> String {
         let rest = line.strip_prefix("let ").unwrap_or("");
         
         if let Some(colon_pos) = rest.find(':') {
             let var_name = rest[..colon_pos].trim();
             let rest = &rest[colon_pos + 1..];
             
-            if let Some(eq_pos) = rest.find('=') {
-                let var_type = rest[..eq_pos].trim();
-                let value = rest[eq_pos + 1..].trim_end_matches(';').trim();
-                return format!("    {} {} = {};\n", var_type, var_name, value);
+            // Get and convert the type
+            let (var_type, remaining) = if let Some(eq_pos) = rest.find('=') {
+                (rest[..eq_pos].trim(), Some(rest[eq_pos + 1..].trim_end_matches(';').trim()))
             } else {
-                let var_type = rest.trim_end_matches(';').trim();
-                return format!("    {} {};\n", var_type, var_name);
+                (rest.trim_end_matches(';').trim(), None)
+            };
+            
+            // Convert ZeoC types to C types
+            let c_type = self.convert_type_to_c(var_type);
+            
+            // Store the variable type for later use in print and struct literals
+            self.var_types.insert(var_name.to_string(), c_type.clone());
+            
+            if let Some(value) = remaining {
+                // Transform the value if needed
+                let c_value = self.transform_value_to_c(&c_type, value);
+                return format!("    {} {} = {};\n", c_type, var_name, c_value);
+            } else {
+                return format!("    {} {};\n", c_type, var_name);
             }
         }
         
         format!("    int {};\n", rest.trim_end_matches(';'))
     }
+    
+    fn transform_const_inline(&mut self, line: &str) -> String {
+        // const MAX: int = 100 -> const int MAX = 100;
+        let rest = line.strip_prefix("const ").unwrap_or("");
+        
+        if let Some(colon_pos) = rest.find(':') {
+            let var_name = rest[..colon_pos].trim();
+            let rest = &rest[colon_pos + 1..];
+            
+            let (var_type, remaining) = if let Some(eq_pos) = rest.find('=') {
+                (rest[..eq_pos].trim(), Some(rest[eq_pos + 1..].trim_end_matches(';').trim()))
+            } else {
+                (rest.trim_end_matches(';').trim(), None)
+            };
+            
+            let c_type = self.convert_type_to_c(var_type);
+            
+            self.var_types.insert(var_name.to_string(), c_type.clone());
+            
+            if let Some(value) = remaining {
+                let c_value = self.transform_value_to_c(&c_type, value);
+                return format!("    const {} {} = {};\n", c_type, var_name, c_value);
+            } else {
+                return format!("    const {} {};\n", c_type, var_name);
+            }
+        }
+        
+        format!("    const int {};\n", rest.trim_end_matches(';'))
+    }
+    
+    fn transform_value_to_c(&self, c_type: &str, value: &str) -> String {
+        let v = value.trim();
+        
+        // Array literal: [1, 2, 3] -> (int[]){1, 2, 3} or just {1, 2, 3}
+        if v.starts_with('[') && v.ends_with(']') {
+            let inner = v.trim_start_matches('[').trim_end_matches(']');
+            // Determine element type
+            let elem_type = if c_type.contains("char*") {
+                "char*"
+            } else if c_type.contains("int*") {
+                "int"
+            } else if c_type.contains("float*") {
+                "float"
+            } else if c_type.contains("double*") {
+                "double"
+            } else {
+                "int"
+            };
+            return format!("({}[]){{{}}}", elem_type, inner);
+        }
+        
+        // Option::Some(value) or Some(value) -> value
+        if v.starts_with("Some(") || v.contains("::Some(") {
+            let inner = v.trim_start_matches("Some(")
+                         .trim_start_matches("Option::Some(")
+                         .trim_start_matches("::Some(")
+                         .trim_end_matches(')');
+            return inner.to_string();
+        }
+        
+        // None -> 0 or NULL
+        if v == "None" || v == "Option::None" || v == "::None" {
+            return "0".to_string();
+        }
+        
+        // Struct literal: Point { x: 0, y: 0 } -> (struct Point){.x = 0, .y = 0}
+        if v.contains(" { ") && v.ends_with('}') {
+            // Extract struct name from value (e.g., "Point { x: 0, y: 0 }" -> "Point")
+            // Also handle "struct Point" type
+            let type_for_struct = c_type.replace("struct ", "");
+            let struct_name = if !type_for_struct.is_empty() && type_for_struct != "int" && type_for_struct != "char*" {
+                type_for_struct
+            } else if v.contains(" { ") && v.ends_with('}') {
+                if let Some(brace_pos) = v.find(" { ") {
+                    v[..brace_pos].trim().to_string()
+                } else {
+                    "".to_string()
+                }
+            } else {
+                "".to_string()
+            };
+            
+            if !struct_name.is_empty() {
+                // Transform field: x: 0 to .x = 0
+                if let Some(brace_pos) = v.find(" { ") {
+                    let inner = v[brace_pos + 3..].trim_end_matches('}');
+                    let fields: Vec<String> = inner.split(',')
+                        .map(|f| {
+                            let parts: Vec<&str> = f.splitn(2, ':').collect();
+                            if parts.len() == 2 {
+                                format!(".{} = {}", parts[0].trim(), parts[1].trim())
+                            } else {
+                                f.to_string()
+                            }
+                        })
+                        .collect();
+                    return format!("(struct {}){{{}}}", struct_name, fields.join(", "));
+                }
+            }
+        }
+        
+        // Pass through other values
+        v.to_string()
+    }
+    
+    fn convert_type_to_c(&self, ztype: &str) -> String {
+        let t = ztype.trim();
+        
+        // Pointer type: *int -> int*
+        if t.starts_with("*") {
+            let base = t.trim_start_matches('*').trim();
+            return format!("{}*", self.convert_type_to_c(base));
+        }
+        
+        // Array type: [int] -> int*
+        if t.starts_with('[') && t.ends_with(']') {
+            let base = t.trim_start_matches('[').trim_end_matches(']').trim();
+            return format!("{}*", self.convert_type_to_c(base));
+        }
+        
+        // Basic types
+        match t {
+            "int" => "int".to_string(),
+            "float" => "float".to_string(),
+            "double" => "double".to_string(),
+            "char" => "char".to_string(),
+            "void" => "void".to_string(),
+            "bool" => "int".to_string(),
+            "string" => "char*".to_string(),
+            "usize" => "size_t".to_string(),
+            "isize" => "ssize_t".to_string(),
+            // Signed integers
+            "i8" => "int8_t".to_string(),
+            "i16" => "int16_t".to_string(),
+            "i32" => "int32_t".to_string(),
+            "i64" => "int64_t".to_string(),
+            // Unsigned integers
+            "u8" => "uint8_t".to_string(),
+            "u16" => "uint16_t".to_string(),
+            "u32" => "uint32_t".to_string(),
+            "u64" => "uint64_t".to_string(),
+            _ => {
+                // Handle Option<T> - convert to T with special handling
+                if t.starts_with("Option<") && t.ends_with(">") {
+                    let inner = t.trim_start_matches("Option<").trim_end_matches(">");
+                    return self.convert_type_to_c(inner);
+                }
+                // User-defined types (like Point) need "struct " prefix
+                if !t.contains(' ') && !t.contains('*') && !t.contains('[') {
+                    return format!("struct {}", t);
+                }
+                t.to_string()
+            }
+        }
+    }
 
-    fn transform_print_inline(&self, line: &str) -> String {
-        let content = line.strip_prefix("print(").unwrap_or("");
+    fn transform_print_inline(&mut self, line: &str) -> String {
+        let trimmed = line.trim();
+        
+        // Determine which prefix to use (print or println)
+        let (prefix, is_println) = if trimmed.starts_with("println(") {
+            ("println(", true)
+        } else if trimmed.starts_with("print(") {
+            ("print(", false)
+        } else {
+            return format!("    {};\n", trimmed); // fallback
+        };
+        
+        // Strip the prefix
+        let content = trimmed.strip_prefix(prefix).unwrap_or("");
         let arg = content.trim_end_matches(')').trim();
         
         if arg.starts_with('"') {
+            // String literal
+            if is_println {
+                return format!("    printf(\"{}\\n\");\n", arg);
+            }
+            // print("string") -> printf("string");
             return format!("    printf({});\n", arg);
         } else {
+            // Variable - check stored type for correct format specifier
+            if let Some(var_type) = self.var_types.get(arg) {
+                if var_type.contains("char*") {
+                    // String variable
+                    if is_println {
+                        return format!("    printf(\"%s\\n\", {});\n", arg);
+                    }
+                    return format!("    printf(\"%s\", {});\n", arg);
+                }
+            }
+            // Default to int
             return format!("    printf(\"%d\\n\", {});\n", arg);
         }
     }
@@ -426,6 +744,30 @@ impl ZeoCTransformer {
         
         self.result.push_str("    /* ZEOC_UNSAFE_BLOCK_END */\n");
     }
+
+    fn transform_unsafe_inline(&self, line: &str) -> String {
+        // Handle single-line unsafe { ... }
+        if line.starts_with("unsafe {") && line.contains("}") {
+            // Single line unsafe { ... }
+            if let Some(start) = line.find("{") {
+                if let Some(end) = line.find("}") {
+                    let body = &line[start + 1..end];
+                    return format!("    /* ZEOC_UNSAFE_START */ {} /* ZEOC_UNSAFE_END */\n", body);
+                }
+            }
+        }
+        
+        if line == "unsafe" {
+            return "    /* unsafe */\n".to_string();
+        }
+        
+        if line.starts_with("unsafe {") {
+            return "    /* unsafe */\n".to_string();
+        }
+        
+        format!("    {};\n", line)
+    }
+
 
     fn process_single_line(&mut self, line: &str) {
         let trimmed = line.trim();
