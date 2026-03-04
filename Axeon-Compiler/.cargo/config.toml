@@ -1,0 +1,10 @@
+[build]
+rustflags = [
+    "-C", "target-cpu=native",
+    "-C", "opt-level=z",
+    "-C", "target-feature=+sse4.2,+avx,+avx2,+fma"
+]
+
+[profile.release]
+lto = "thin"
+codegen-units = 1

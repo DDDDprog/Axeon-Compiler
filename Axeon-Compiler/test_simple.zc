@@ -1,0 +1,15 @@
+// ZeoC test program - simple version
+import std.io
+
+// Function with new fn syntax
+fn main() -> int {
+    let x: int = 5
+    print(x)
+    return 0
+}
+
+// Struct with new syntax  
+struct Point {
+    x: int
+    y: int
+}

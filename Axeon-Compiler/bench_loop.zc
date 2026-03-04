@@ -1,0 +1,12 @@
+import std.io
+
+fn main() -> int {
+    let sum: int = 0
+    
+    for (int i = 0; i < 1000000; i = i + 1) {
+        sum = sum + i
+    }
+    
+    print(sum)
+    return 0
+}

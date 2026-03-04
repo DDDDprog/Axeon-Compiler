@@ -1,0 +1,39 @@
+// ZeoC test program - demonstrates modern C syntax
+import std.io
+
+// Function with new fn syntax
+fn main() -> int {
+    let x: int = 5
+    print(x)
+    
+    // Dynamic array
+    let arr: [int] = [1, 2, 3]
+    
+    // String type
+    let s: string = "Hello, ZeoC!"
+    print(s)
+    
+    // Option type
+    let value: Option<int> = Some(42)
+    
+    // Pointer
+    let p: *int = &x
+    
+    // Unsafe block for raw pointer operations
+    unsafe {
+        let raw = p as *int
+    }
+    
+    return 0
+}
+
+// Struct with new syntax
+struct Point {
+    x: int
+    y: int
+}
+
+fn create_point(a: int, b: int) -> Point {
+    let p: Point = Point { x: a, y: b }
+    return p
+}

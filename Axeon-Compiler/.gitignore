@@ -1,0 +1,41 @@
+# Build artifacts
+/target/
+Cargo.lock
+
+# Compiled files
+*.o
+*.obj
+*.exe
+*.dll
+*.so
+*.dylib
+*.a
+*.lib
+
+# Assembly output
+*.s
+*.asm
+
+# Core dumps
+core
+*.core
+dump.rdb
+
+# Executables
+a.out
+*.out
+
+# IDE
+.idea/
+.vscode/
+*.swp
+*.swo
+*~
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Debug build artifacts
+debug/
+release/

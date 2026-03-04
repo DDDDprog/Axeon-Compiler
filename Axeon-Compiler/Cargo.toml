@@ -1,0 +1,50 @@
+[package]
+name = "axeon"
+version = "0.3.0-dev"
+edition = "2021"
+description = "Axeon — a production-grade modern C compiler targeting x86-64, i686, ARM64, and RISC-V"
+authors = ["Dipanjan Dhar <ddhar1219@gmail.com> "]
+license = "MIT"
+autobins = false
+publish = false
+
+[[bin]]
+name = "axeon"
+path = "src/main.rs"
+
+[features]
+# Optional features for future optimization
+default = ["x86", "arm", "riscv", "i686"]
+x86 = []
+arm = []
+riscv = []
+i686 = []
+ssa = ["optimizer"]
+optimizer = []
+
+[dependencies]
+anyhow = "1.0"        # robust error handling
+log = "0.4"           # logging
+env_logger = "0.10"   # logger backend
+lazy_static = "1.4"   # global data structures
+regex = "1.10"        # parsing utilities
+itertools = "0.11"    # iterator helpers
+
+[dev-dependencies]
+pretty_assertions = "1.3"  # nicer assertion messages
+insta = "1.32"             # snapshot testing (IR/AST)
+
+[profile.release]
+opt-level = "z"      # best size optimization
+lto = true           # link-time optimization
+codegen-units = 1    # maximize optimization
+panic = "abort"      # reduce overhead
+incremental = false
+debug = false
+
+[profile.dev]
+opt-level = 1
+lto = false
+codegen-units = 16   # faster incremental builds
+incremental = true
+debug = true

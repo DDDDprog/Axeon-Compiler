@@ -1,0 +1,18 @@
+[package]
+name = "axeon-driver"
+version = "0.2.0"
+edition = "2021"
+description = "Axeon compiler driver - handles CLI, preprocessing, and compilation pipeline"
+authors = ["Dipanjan Dhar <ddhar1219@gmail.com>"]
+license = "MIT"
+
+[dependencies]
+anyhow = "1.0"
+log = "0.4"
+env_logger = "0.10"
+lazy_static = "1.4"
+regex = "1.10"
+itertools = "0.11"
+
+[dev-dependencies]
+pretty_assertions = "1.3"
