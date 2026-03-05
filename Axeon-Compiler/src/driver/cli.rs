@@ -99,9 +99,9 @@ impl Driver {
                     println!("   ▓█   ▓██▒ ▒██▒ ▒██▒░▒████▒░ ████▓▒░▒██░   ▓██░");
                     println!("   ▒▒   ▓▒█░ ▒▒ ░ ░▓ ░░░ ▒░ ░░ ▒░▒░▒░ ░ ▒░   ▒ ▒ ");
                     println!("{reset}");
-                    println!("              {magenta}AXEON PRO{reset} | {yellow}ZEO C{reset} | Version 2.43");
+                    println!("              {magenta}AXEON PRO{reset} | {yellow}C COMPILER{reset} | Version 2.43");
                     println!();
-                    println!("📖 ZeoC Language - Modern C-like Programming");
+                    println!("📖 Axeon C Compiler - Standard C Programming");
                     println!("🌐 https://github.com/DDDDprog/Axeon-Compiler");
                     println!();
                     println!("Target: {}", target.triple());

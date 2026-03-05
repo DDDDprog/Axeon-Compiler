@@ -78,30 +78,6 @@ pub enum TokenKind {
     StaticAssert,
     ThreadLocal,
 
-    // ZeoC keywords (modern C dialect)
-    /// ZeoC: function keyword (fn instead of return type first)
-    Fn,
-    /// ZeoC: let declaration (let name: type = value)
-    Let,
-    /// ZeoC: unsafe block for raw pointer operations
-    Unsafe,
-    /// ZeoC: import module (import std.io)
-    Import,
-    /// ZeoC: string type
-    String,
-    /// ZeoC: option type (no null)
-    Option,
-    /// ZeoC: some variant for Option
-    Some,
-    /// ZeoC: none variant for Option
-    None,
-    /// ZeoC: true literal
-    True,
-    /// ZeoC: false literal
-    False,
-    /// ZeoC: dynamic array type [type]
-    DynamicArray,
-
     // GCC extensions
     Typeof,
     Asm,
@@ -378,19 +354,6 @@ impl std::fmt::Display for TokenKind {
 
             // Special
             TokenKind::Eof => write!(f, "end of input"),
-
-            // ZeoC keywords
-            TokenKind::Fn => write!(f, "fn"),
-            TokenKind::Let => write!(f, "let"),
-            TokenKind::Unsafe => write!(f, "unsafe"),
-            TokenKind::Import => write!(f, "import"),
-            TokenKind::String => write!(f, "string"),
-            TokenKind::Option => write!(f, "Option"),
-            TokenKind::Some => write!(f, "Some"),
-            TokenKind::None => write!(f, "None"),
-            TokenKind::True => write!(f, "true"),
-            TokenKind::False => write!(f, "false"),
-            TokenKind::DynamicArray => write!(f, "[T]"),
         }
     }
 }
@@ -487,18 +450,6 @@ impl TokenKind {
             "__label__" => Some(TokenKind::GnuLabel),
             "__seg_gs" => Some(TokenKind::SegGs),
             "__seg_fs" => Some(TokenKind::SegFs),
-
-            // ZeoC keywords (modern C dialect)
-            "fn" => Some(TokenKind::Fn),
-            "let" => Some(TokenKind::Let),
-            "unsafe" => Some(TokenKind::Unsafe),
-            "import" => Some(TokenKind::Import),
-            "string" => Some(TokenKind::String),
-            "Option" => Some(TokenKind::Option),
-            "Some" => Some(TokenKind::Some),
-            "None" => Some(TokenKind::None),
-            "true" => Some(TokenKind::True),
-            "false" => Some(TokenKind::False),
 
             // __builtin_va_start, __builtin_va_end, __builtin_va_copy remain as
             // Identifier tokens so they flow through the normal builtin call path

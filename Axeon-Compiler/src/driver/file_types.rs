@@ -52,14 +52,8 @@ impl Driver {
     }
 
     /// Check if a file has a known C source extension.
-    /// Also supports ZeoC (.zc) files with modern syntax.
     pub(super) fn is_c_source(path: &str) -> bool {
-        path.ends_with(".c") || path.ends_with(".h") || path.ends_with(".i") || path.ends_with(".zc")
-    }
-
-    /// Check if a file is a ZeoC source file (modern C dialect).
-    pub(super) fn is_zeoc_source(path: &str) -> bool {
-        path.ends_with(".zc")
+        path.ends_with(".c") || path.ends_with(".h") || path.ends_with(".i")
     }
 
     /// Check if a file has a C++ source extension.

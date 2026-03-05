@@ -16,8 +16,6 @@ use crate::frontend::lexer::Lexer;
 use crate::frontend::parser::Parser;
 use crate::frontend::preprocessor::Preprocessor;
 use crate::frontend::sema::SemanticAnalyzer;
-use crate::frontend::zeoc;
-use crate::frontend::unified_source;
 use crate::ir::lowering::Lowerer;
 use crate::ir::mem2reg::{eliminate_phis, promote_allocas};
 use crate::passes::run_passes;
@@ -377,16 +375,8 @@ impl Driver {
                 continue;
             }
 
-            // Unified source processing - handles both C and ZeoC automatically
-            let source = if input_file.ends_with(".zc") {
-                // .zc files are always processed as ZeoC
-                let source = Self::read_source(input_file)?;
-                unified_source::process_file(&source, input_file)
-            } else {
-                // Auto-detect C vs ZeoC for other extensions
-                let source = Self::read_source(input_file)?;
-                unified_source::process_file(&source, input_file)
-            };
+            // Read source file directly for C compilation
+            let source = Self::read_source(input_file)?;
 
             let mut preprocessor = Preprocessor::new();
             self.configure_preprocessor(&mut preprocessor);
@@ -834,16 +824,8 @@ impl Driver {
     ///
     /// Set `CCC_TIME_PHASES=1` in the environment to print per-phase timing to stderr.
     fn compile_to_assembly(&self, input_file: &str) -> Result<String, String> {
-        // Unified source processing - handles both C and ZeoC automatically
-        let source = if input_file.ends_with(".zc") {
-            // .zc files are always processed as ZeoC
-            let source = Self::read_source(input_file)?;
-            unified_source::process_file(&source, input_file)
-        } else {
-            // Auto-detect C vs ZeoC for other extensions
-            let source = Self::read_source(input_file)?;
-            unified_source::process_file(&source, input_file)
-        };
+        // Read source file directly for C compilation
+        let source = Self::read_source(input_file)?;
 
         let time_phases = std::env::var("CCC_TIME_PHASES").is_ok();
         let t0 = std::time::Instant::now();
